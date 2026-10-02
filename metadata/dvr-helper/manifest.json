@@ -1,0 +1,50 @@
+{
+  "generated_at": "2026-10-02T16:00:19Z",
+  "manifest": {
+    "slug": "dvr-helper",
+    "name": "DVR Helper",
+    "description": "Beta. Dedupe, rerun skipping, stream failover and Jellyfin metadata for Dispatcharr series-rule recordings.",
+    "author": "adamef93",
+    "maintainers": [
+      "adamef93"
+    ],
+    "license": "Unlicense",
+    "source_type": "external",
+    "source_url": "https://github.com/adamef93/dvr-helper/releases/download/v{version}/dvr_helper-{version}.zip",
+    "repo_url": "https://github.com/adamef93/dvr-helper",
+    "registry_url": "https://github.com/adamef93/dvr-helper",
+    "registry_name": "DVR Helper (adamef93)",
+    "last_updated": "2026-10-02T16:00:19Z",
+    "latest": {
+      "version": "0.1.0-beta",
+      "prerelease": true,
+      "commit_sha": "acb5c789728f1a1b00b4ceccb6040229ba7e79dc",
+      "commit_sha_short": "acb5c78",
+      "build_timestamp": "2026-10-02T16:00:19Z",
+      "last_updated": "2026-10-02T16:00:19Z",
+      "checksum_md5": "5adc4a1d652b6418811172f56fe10014",
+      "checksum_sha256": "3c9b1eab57468dd8412fe12d10d02a159f7c07094a5a43c45371ee0f59254e03",
+      "min_dispatcharr_version": "v0.31.0",
+      "source_url": "https://github.com/adamef93/dvr-helper/releases/download/v0.1.0-beta/dvr_helper-0.1.0-beta.zip",
+      "url": "v0.1.0-beta/dvr_helper-0.1.0-beta.zip",
+      "size": 13479,
+      "latest_url": "v0.1.0-beta/dvr_helper-0.1.0-beta.zip"
+    },
+    "versions": [
+      {
+        "version": "0.1.0-beta",
+        "prerelease": true,
+        "commit_sha": "acb5c789728f1a1b00b4ceccb6040229ba7e79dc",
+        "commit_sha_short": "acb5c78",
+        "build_timestamp": "2026-10-02T16:00:19Z",
+        "last_updated": "2026-10-02T16:00:19Z",
+        "checksum_md5": "5adc4a1d652b6418811172f56fe10014",
+        "checksum_sha256": "3c9b1eab57468dd8412fe12d10d02a159f7c07094a5a43c45371ee0f59254e03",
+        "min_dispatcharr_version": "v0.31.0",
+        "source_url": "https://github.com/adamef93/dvr-helper/releases/download/v0.1.0-beta/dvr_helper-0.1.0-beta.zip",
+        "url": "v0.1.0-beta/dvr_helper-0.1.0-beta.zip",
+        "size": 13479
+      }
+    ]
+  }
+}

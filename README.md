@@ -29,6 +29,18 @@ Artwork is looked up on the public internet from the programme title only. **It 
 
 ## Install
 
+### From Dispatcharr (plugin repo)
+
+1. In Dispatcharr go to *Plugins* and add a repository with this URL:
+
+   ```
+   https://raw.githubusercontent.com/adamef93/dvr-helper/main/manifest.json
+   ```
+2. Install **DVR Helper** from that repo, enable it and open its settings. The repo is unsigned, so Dispatcharr will show it as unverified.
+3. **Restart Dispatcharr** after installing or updating.
+
+### Manually
+
 The plugin must be installed in a folder named **`dvr_helper`** (Dispatcharr uses the folder name as the plugin key).
 
 1. Copy the `dvr_helper/` folder into Dispatcharr's plugins directory (`/data/plugins/` inside the container, i.e. the `plugins` folder of your Dispatcharr data volume on the host), **or** zip the folder and use *Plugins → Import*.
@@ -83,6 +95,12 @@ This is a beta. Things to know:
 ## Development
 
 Single file: `dvr_helper/plugin.py`. Dispatcharr loads it as a legacy-style plugin (`Plugin` class with `fields` and `actions`); `plugin.json` is the manifest.
+
+### Releasing
+
+1. Bump `version` in `dvr_helper/plugin.json` and in `Plugin.version`, and update `CHANGELOG.md`.
+2. Build the zip (`dvr_helper/` at its root) and create the GitHub release with that zip attached.
+3. Run `python3 scripts/make_manifest.py dist/dvr_helper-<version>.zip <commit>` using the exact zip you attached, and commit `manifest.json` and `metadata/`.
 
 ## License
 
