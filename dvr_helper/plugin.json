@@ -1,0 +1,10 @@
+{
+  "name": "DVR Helper",
+  "license": "Unlicense",
+  "description": "Beta. Dedupe, rerun skipping, stream failover and Jellyfin metadata for Dispatcharr series-rule recordings.",
+  "author": "adamef93",
+  "version": "0.1.0-beta",
+  "min_dispatcharr_version": "v0.31.0",
+  "repo_url": "https://github.com/adamef93/dvr-helper",
+  "help_url": "https://github.com/adamef93/dvr-helper"
+}
