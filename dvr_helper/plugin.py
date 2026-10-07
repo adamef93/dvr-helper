@@ -47,6 +47,7 @@ DEFAULTS = {
     "start_delay_minutes": 5,
     "skip_handled_airings": True,
     "rerun_window_hours": 12,
+    "matchup_rerun_window_hours": 24,
     "jellyfin_host": "",
     "jellyfin_api_key": "",
     "jellyfin_recordings_path": "/downloads/recordings",
@@ -304,30 +305,46 @@ def _norm_title(title):
 
 
 def _matchup_key(title):
-    """('bruins', 'rangers')-style key for 'League: Away at Home' titles, else None."""
+    """('bruins', 'rangers', ordered) for 'League: Away at Home' titles, else None.
+
+    `ordered` is True for 'at'/'@' (second team hosts) and False for 'vs'."""
     t = _clean_title(title or "")
     if ":" in t:
         t = t.split(":", 1)[1]
+    sep = MATCHUP_SEP.search(t.strip())
     parts = MATCHUP_SEP.split(t.strip())
-    if len(parts) != 2:
+    if not sep or len(parts) != 2:
         return None
     teams = [re.sub(r"[^a-z0-9 ]", "", x.lower()).strip() for x in parts]
-    return tuple(teams) if all(teams) else None
+    if not all(teams):
+        return None
+    return teams[0], teams[1], sep.group(0).strip().lower() in ("at", "@")
 
 
 def _same_team(a, b):
     return a == b or a.endswith(" " + b) or b.endswith(" " + a)
 
 
-def _same_programme(snap_a, snap_b):
-    """Same title, or the same two teams under differently worded titles
-    ('Bruins at Rangers' vs 'NHL Hockey : Boston Bruins at New York Rangers')."""
-    if _norm_title(snap_a.get("title")) == _norm_title(snap_b.get("title")):
-        return True
+def _same_matchup(ka, kb):
+    """Same game? 'A at B' only equals 'A at B': teams don't play at the same
+    venue back to back, so a second 'A at B' soon after is a replay, while
+    'B at A' is a different game. 'vs' titles don't say who hosts, so either
+    order matches."""
+    same = _same_team(ka[0], kb[0]) and _same_team(ka[1], kb[1])
+    if ka[2] and kb[2]:
+        return same
+    return same or (_same_team(ka[0], kb[1]) and _same_team(ka[1], kb[0]))
+
+
+def _programme_match(snap_a, snap_b):
+    """'matchup' if both are the same team-vs-team game (however the titles are
+    worded), 'title' if the titles are otherwise identical, else None."""
     ka, kb = _matchup_key(snap_a.get("title")), _matchup_key(snap_b.get("title"))
-    if not (ka and kb):
-        return False
-    return any(_same_team(ka[0], x) and _same_team(ka[1], y) for x, y in (kb, kb[::-1]))
+    if ka and kb and _same_matchup(ka, kb):
+        return "matchup"
+    if _norm_title(snap_a.get("title")) == _norm_title(snap_b.get("title")):
+        return "title"
+    return None
 
 
 def _has_content(rec):
@@ -339,39 +356,63 @@ def _has_content(rec):
     return status in ("stopped", "interrupted") and (cp.get("bytes_written") or 0) > 0
 
 
-def _drop_rerun(rec, cfg, rules):
+def _drop_rerun(rec, cfg, rules, dry=False, trace=None):
     """Delete a recording that is a later replay of a programme already recorded
-    (or booked to record earlier) within rerun_window_hours."""
+    (or booked to record earlier).
+
+    A team-vs-team game ('A at B') counts as a rerun if the same game aired within
+    matchup_rerun_window_hours before it; any other programme with the same title
+    within rerun_window_hours. With dry=True, only report the recording it would
+    be a rerun of (its id) instead of deleting."""
     from apps.channels.models import Recording
 
-    hours = float(cfg["rerun_window_hours"] or 0)
-    if hours <= 0 or _cp(rec).get("failover_of"):
+    title_hours = float(cfg["rerun_window_hours"] or 0)
+    game_hours = float(cfg["matchup_rerun_window_hours"] or 0)
+    longest = max(title_hours, game_hours)
+    if longest <= 0 or _cp(rec).get("failover_of"):
         return False
+    note = trace.append if trace is not None else (lambda _m: None)
     my_rules = _matched_rules(rec, rules)
     my_snap = _snap(rec)
-    my_start = parse_datetime(_snap(rec).get("start_time") or "") or rec.start_time
+    my_start = parse_datetime(my_snap.get("start_time") or "") or rec.start_time
+    note("rules matched by this recording: %s" % sorted(my_rules))
     if not my_rules or not my_snap.get("title"):
         return False
-    span = timedelta(hours=hours)
+    span = timedelta(hours=longest)
     for other in Recording.objects.exclude(pk=rec.pk).filter(
         end_time__gte=rec.end_time - span - timedelta(hours=6),
         end_time__lte=rec.end_time + span,
     ):
-        if not _has_content(other) or not _same_programme(my_snap, _snap(other)):
+        if not _has_content(other):
+            note("%s: no content/dead" % other.pk)
             continue
+        kind = _programme_match(my_snap, _snap(other))
+        if kind is None:
+            note("%s: different programme (%r)" % (other.pk, _snap(other).get("title")))
+            continue
+        limit = timedelta(hours=game_hours if kind == "matchup" else title_hours)
         o_start = parse_datetime(_snap(other).get("start_time") or "") or other.start_time
         # Only the later airing is the rerun; keep the earlier one.
-        if not (timedelta(0) < my_start - o_start <= span):
+        if not (timedelta(0) < my_start - o_start <= limit):
+            note("%s: %s match but %.1fh apart (limit %.0fh) or not earlier" % (
+                other.pk, kind, (my_start - o_start).total_seconds() / 3600, limit.total_seconds() / 3600))
             continue
-        ia, ib = _identity(_snap(rec)), _identity(_snap(other))
+        ia, ib = _identity(my_snap), _identity(_snap(other))
         if ia is not None and ib is not None and ia != ib:
+            note("%s: different episode" % other.pk)
             continue  # different episode of the same series
-        if _matched_rules(other, rules) & my_rules:
+        # The earlier airing's guide row is usually purged once it has aired, so its
+        # rules can't always be looked up; only reject when they are known and differ.
+        other_rules = _matched_rules(other, rules)
+        note("%s: %s match; its rules: %s" % (other.pk, kind, sorted(other_rules)))
+        if not other_rules or (other_rules & my_rules):
+            if dry:
+                return other.pk
             rid = rec.pk
             rec.delete()
             logger.info(
-                "dvr_helper: removed recording %s; rerun of recording %s (aired %s)",
-                rid, other.pk, o_start,
+                "dvr_helper: removed recording %s; rerun of recording %s (%s match, aired %s)",
+                rid, other.pk, kind, o_start,
             )
             return True
     return False
@@ -396,7 +437,12 @@ def _drop_handled_airing(rec, cfg, rules):
     for other in qs:
         if _cp(other).get("status") not in HANDLED_STATUSES or not _same_airing(rec, other):
             continue
-        if _matched_rules(other, rules) & my_rules:
+        # Must be the same programme: with the guide row purged we can't compare rules,
+        # and a different game ending at about the same time must not be cancelled.
+        if _programme_match(_snap(rec), _snap(other)) is None:
+            continue
+        other_rules = _matched_rules(other, rules)  # empty once the guide row is purged
+        if not other_rules or (other_rules & my_rules):
             rid = rec.pk
             rec.delete()
             logger.info(
@@ -629,7 +675,7 @@ def _failover_when_settled(rid, cfg):
     logger.info("dvr_helper: recording %s failover result: %s", rid, result)
 
 
-def _guard_started(rid, cfg):
+def _guard_started(rid, cfg, dry=False):
     """recording_start hook: cancel a series-rule recording that should not run.
 
     Dispatcharr's rule check books in a worker where the post_save hook above is
@@ -641,6 +687,10 @@ def _guard_started(rid, cfg):
     if rec is None or _cp(rec).get("failover_of"):
         return {"status": "skipped", "reason": "gone or failover recording"}
     rules = _rules()
+    if dry:
+        trace = []
+        other = _drop_rerun(rec, cfg, rules, dry=True, trace=trace)
+        return {"status": "dry_run", "rerun_of": other or None, "trace": trace}
     if cfg["skip_handled_airings"] and _drop_handled_airing(rec, cfg, rules):
         return {"status": "ok", "removed": rid, "why": "airing already stopped/completed"}
     if cfg["enable_dedupe"] and _drop_rerun(rec, cfg, rules):
@@ -990,7 +1040,10 @@ class Plugin:
         {"id": "skip_handled_airings", "label": "Don't re-record airings already stopped/completed", "type": "boolean",
          "default": DEFAULTS["skip_handled_airings"],
          "help_text": "Stops the guide re-booking a game you stopped (or that finished) while it is still listed."},
-        {"id": "rerun_window_hours", "label": "Skip reruns within N hours", "type": "number",
+        {"id": "matchup_rerun_window_hours", "label": "Skip game reruns within N hours", "type": "number",
+         "default": DEFAULTS["matchup_rerun_window_hours"],
+         "help_text": "A later airing of the same 'Team A at Team B' game as something already recorded/booked within this many hours is treated as a rerun (teams don't play at the same venue back to back). 0 disables."},
+        {"id": "rerun_window_hours", "label": "Skip other reruns within N hours", "type": "number",
          "default": DEFAULTS["rerun_window_hours"],
          "help_text": "A later airing with the same title as something already recorded/booked within this many hours is treated as a rerun and not recorded. Different episodes of a series are kept. 0 disables."},
         {"id": "jellyfin_host", "label": "Jellyfin host:port", "type": "string", "default": "",
@@ -1098,7 +1151,7 @@ class Plugin:
             if rid is None:
                 return {"status": "skipped", "reason": "no recording_id"}
             try:
-                result = _guard_started(int(rid), cfg)
+                result = _guard_started(int(rid), cfg, dry=bool((params or {}).get("dry_run")))
             except Exception:
                 logger.exception("dvr_helper: start guard failed for recording %s", rid)
                 return {"status": "error"}

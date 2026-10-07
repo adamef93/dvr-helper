@@ -13,7 +13,7 @@ It works from the DVR **series rules you already have** in Dispatcharr. There is
 | Feature | What happens |
 |---|---|
 | **Dedupe** | Dispatcharr books a series-rule airing once per channel that carries it. DVR Helper keeps one and removes the others. |
-| **Reruns** | A later airing of something already recorded or booked within N hours (default 12) is not recorded. Matched by title, or by the two teams for sports matchups (so `Devils at Islanders` and `NHL Hockey : New Jersey Devils at New York Islanders` count as the same game). Different episodes of a series are kept. |
+| **Reruns** | A later airing of something already recorded or booked is not recorded. For team-vs-team games (`Team A at Team B`), the same game within 24 hours is a rerun, however the title is worded (`Mammoth at Devils` and `NHL Hockey : Utah Mammoth at New Jersey Devils` are the same game) — teams don't play at the same venue back to back, and `A at B` is not `B at A`. Any other programme with an identical title within 12 hours is a rerun too. Different episodes of a series are kept. |
 | **Already handled** | If you stopped a recording, or it completed, the guide may keep listing the airing for hours and Dispatcharr re-books it. DVR Helper cancels the re-booking. |
 | **Failover** | If a recording dies because its stream died, a new recording starts on another channel airing the same programme, until the original end time. It is a separate file, not stitched into the first. |
 | **Start delay** | Series-rule recordings booked ahead of time start N minutes late (default 5). Dispatcharr's own offset only supports starting earlier. |
@@ -63,7 +63,8 @@ cd dvr-helper && zip -r dvr_helper.zip dvr_helper
 | Max channels to try per airing | 3 | |
 | Start recordings N minutes late | 5 | `0` disables. Only applies to recordings booked before their start. |
 | Don't re-record airings already stopped/completed | on | |
-| Skip reruns within N hours | 12 | `0` disables. See limitations for shows with no episode data. |
+| Skip game reruns within N hours | 24 | Same `Team A at Team B` game as an earlier recording. `0` disables. |
+| Skip other reruns within N hours | 12 | Identical title. `0` disables. See limitations for shows with no episode data. |
 | Jellyfin host:port | blank | e.g. `jellyfin:8096`. Blank disables Jellyfin features. Must be reachable **from the Dispatcharr container**. |
 | Jellyfin API key | blank | Create one in Jellyfin → Dashboard → API Keys. Stored in plain text in the plugin settings (Dispatcharr's settings form has no password field). |
 | Recordings folder as Jellyfin sees it | `/downloads/recordings` | The Jellyfin-side path of Dispatcharr's recordings folder. A Jellyfin library must include it. |

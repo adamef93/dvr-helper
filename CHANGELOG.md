@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+* Rerun check for team-vs-team games now uses a separate 24-hour window (new setting) and respects home/away order (`A at B` is not `B at A`). Previously a replay more than 12 hours after the live game was missed.
+* Fixed rerun and already-handled checks being skipped once the earlier airing's guide row had been purged, which is the normal state a few hours after it airs.
+* The already-handled guard now also requires the same programme or matchup.
+* *Run guard* accepts `dry_run` and returns a trace of why a recording would or wouldn't be treated as a rerun.
+
 ## 0.1.0-beta
 
 First public beta.
