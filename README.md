@@ -2,7 +2,7 @@
 
 A [Dispatcharr](https://github.com/Dispatcharr/Dispatcharr) plugin that makes series-rule DVR recordings behave, and optionally pushes finished recordings into Jellyfin with a description and artwork.
 
-> **Status: beta 0.1.0.** It runs on a real setup, but a lot is still being worked out
+> **Status: beta 0.1.2.** It runs on a real setup, but a lot is still being worked out
 > (see [Known limitations](#known-limitations)). Expect rough edges and breaking changes.
 > Tested with Dispatcharr 0.31.0 and Jellyfin 12.1.0.
 

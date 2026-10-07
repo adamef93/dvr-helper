@@ -874,7 +874,7 @@ def _guard_started(rid, cfg, dry=False):
 # Artwork never comes from the playlist or guide data (those URLs are private
 # to the user); it is looked up on the public internet from the programme title.
 
-HTTP_HEADERS = {"User-Agent": "dvr-helper/0.1.0-beta"}
+HTTP_HEADERS = {"User-Agent": "dvr-helper/0.1.2-beta"}
 MAX_IMAGE_BYTES = 15 * 1024 * 1024
 MATCHUP_SEP = re.compile(r"\s+(?:at|vs\.?|v\.?|@)\s+", re.I)
 
@@ -1175,7 +1175,7 @@ def _metadata_when_finished(rid, cfg):
 
 class Plugin:
     name = "DVR Helper"
-    version = "0.1.0-beta"
+    version = "0.1.2-beta"
     author = "adamef93"
     help_url = "https://github.com/adamef93/dvr-helper"
     description = (

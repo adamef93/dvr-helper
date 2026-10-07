@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.1.2-beta
+
+(0.1.1 was never released; its changes are included here.)
 
 * New airing ledger (SQLite, in Dispatcharr's data folder) so deleting a recording or its file no longer defeats rerun and already-handled protection. New settings/actions: *Remember recorded airings for N days*, *Update ledger*, *Forget entry*.
 * Rerun check for team-vs-team games now uses a separate 24-hour window (new setting) and respects home/away order (`A at B` is not `B at A`). Previously a replay more than 12 hours after the live game was missed.
