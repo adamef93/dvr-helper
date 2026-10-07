@@ -10,12 +10,12 @@
       "manifest_url": "https://raw.githubusercontent.com/adamef93/dvr-helper/main/metadata/dvr-helper/manifest.json",
       "author": "adamef93",
       "license": "Unlicense",
-      "last_updated": "2026-10-02T16:00:19Z",
-      "latest_version": "0.1.0-beta",
-      "latest_md5": "5adc4a1d652b6418811172f56fe10014",
-      "latest_sha256": "3c9b1eab57468dd8412fe12d10d02a159f7c07094a5a43c45371ee0f59254e03",
-      "latest_url": "v0.1.0-beta/dvr_helper-0.1.0-beta.zip",
-      "latest_size": 13479,
+      "last_updated": "2026-10-07T14:42:14Z",
+      "latest_version": "0.1.2-beta",
+      "latest_md5": "d1ef0b8dad3a15825c98996e05491fa7",
+      "latest_sha256": "0df113ddbbf31f9df3b1ecca7698e0949c11e1f32b3c07a0ffa7930118c0ace0",
+      "latest_url": "v0.1.2-beta/dvr_helper-0.1.2-beta.zip",
+      "latest_size": 16679,
       "min_dispatcharr_version": "v0.31.0"
     }
   ]

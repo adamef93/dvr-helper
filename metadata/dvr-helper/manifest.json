@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-10-02T16:00:19Z",
+  "generated_at": "2026-10-07T14:42:14Z",
   "manifest": {
     "slug": "dvr-helper",
     "name": "DVR Helper",
@@ -14,23 +14,37 @@
     "repo_url": "https://github.com/adamef93/dvr-helper",
     "registry_url": "https://github.com/adamef93/dvr-helper",
     "registry_name": "DVR Helper (adamef93)",
-    "last_updated": "2026-10-02T16:00:19Z",
+    "last_updated": "2026-10-07T14:42:14Z",
     "latest": {
-      "version": "0.1.0-beta",
+      "version": "0.1.2-beta",
       "prerelease": true,
-      "commit_sha": "acb5c789728f1a1b00b4ceccb6040229ba7e79dc",
-      "commit_sha_short": "acb5c78",
-      "build_timestamp": "2026-10-02T16:00:19Z",
-      "last_updated": "2026-10-02T16:00:19Z",
-      "checksum_md5": "5adc4a1d652b6418811172f56fe10014",
-      "checksum_sha256": "3c9b1eab57468dd8412fe12d10d02a159f7c07094a5a43c45371ee0f59254e03",
+      "commit_sha": "1b21e49c6033716efdca0b28713af6b536deab24",
+      "commit_sha_short": "1b21e49",
+      "build_timestamp": "2026-10-07T14:42:14Z",
+      "last_updated": "2026-10-07T14:42:14Z",
+      "checksum_md5": "d1ef0b8dad3a15825c98996e05491fa7",
+      "checksum_sha256": "0df113ddbbf31f9df3b1ecca7698e0949c11e1f32b3c07a0ffa7930118c0ace0",
       "min_dispatcharr_version": "v0.31.0",
-      "source_url": "https://github.com/adamef93/dvr-helper/releases/download/v0.1.0-beta/dvr_helper-0.1.0-beta.zip",
-      "url": "v0.1.0-beta/dvr_helper-0.1.0-beta.zip",
-      "size": 13479,
-      "latest_url": "v0.1.0-beta/dvr_helper-0.1.0-beta.zip"
+      "source_url": "https://github.com/adamef93/dvr-helper/releases/download/v0.1.2-beta/dvr_helper-0.1.2-beta.zip",
+      "url": "v0.1.2-beta/dvr_helper-0.1.2-beta.zip",
+      "size": 16679,
+      "latest_url": "v0.1.2-beta/dvr_helper-0.1.2-beta.zip"
     },
     "versions": [
+      {
+        "version": "0.1.2-beta",
+        "prerelease": true,
+        "commit_sha": "1b21e49c6033716efdca0b28713af6b536deab24",
+        "commit_sha_short": "1b21e49",
+        "build_timestamp": "2026-10-07T14:42:14Z",
+        "last_updated": "2026-10-07T14:42:14Z",
+        "checksum_md5": "d1ef0b8dad3a15825c98996e05491fa7",
+        "checksum_sha256": "0df113ddbbf31f9df3b1ecca7698e0949c11e1f32b3c07a0ffa7930118c0ace0",
+        "min_dispatcharr_version": "v0.31.0",
+        "source_url": "https://github.com/adamef93/dvr-helper/releases/download/v0.1.2-beta/dvr_helper-0.1.2-beta.zip",
+        "url": "v0.1.2-beta/dvr_helper-0.1.2-beta.zip",
+        "size": 16679
+      },
       {
         "version": "0.1.0-beta",
         "prerelease": true,
