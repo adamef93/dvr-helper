@@ -21,13 +21,15 @@ import base64
 import logging
 import os
 import re
+import sqlite3
 import threading
 import unicodedata
 import time
-from datetime import timedelta
+from contextlib import closing
+from datetime import timedelta, timezone as dt_timezone
 
 from django.db.models import Q
-from django.db.models.signals import post_save
+from django.db.models.signals import post_save, pre_delete
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
@@ -35,6 +37,7 @@ logger = logging.getLogger(__name__)
 
 PLUGIN_KEY = "dvr_helper"  # must match the folder name the plugin is installed under
 SIGNAL_UID = "dvr_helper_signals"
+DELETE_SIGNAL_UID = "dvr_helper_ledger_delete"
 
 DEFAULTS = {
     "enable_dedupe": True,
@@ -48,6 +51,7 @@ DEFAULTS = {
     "skip_handled_airings": True,
     "rerun_window_hours": 12,
     "matchup_rerun_window_hours": 24,
+    "ledger_retention_days": 14,
     "jellyfin_host": "",
     "jellyfin_api_key": "",
     "jellyfin_recordings_path": "/downloads/recordings",
@@ -216,6 +220,169 @@ def _siblings(rec, cfg, rules, my_rules):
 
 
 # --------------------------------------------------------------------------
+# Airing ledger
+# --------------------------------------------------------------------------
+# Dispatcharr forgets a recording the moment it is deleted, which would make a
+# replay of a game you already watched (and deleted) look new. The ledger is a
+# small SQLite file the plugin owns; it remembers each recorded airing until it
+# is old enough that no replay window can reach it. Deleting a recording or its
+# file, in Dispatcharr or Jellyfin, leaves the ledger entry in place.
+
+LEDGER_DIR = "/data/dvr_helper"  # Dispatcharr's data volume, outside the plugin folder
+LEDGER_PATH = LEDGER_DIR + "/ledger.db"
+UTC_FMT = "%Y-%m-%dT%H:%M:%SZ"
+
+
+def _iso(dt):
+    return dt.astimezone(dt_timezone.utc).strftime(UTC_FMT)
+
+
+def _ledger():
+    os.makedirs(LEDGER_DIR, exist_ok=True)
+    conn = sqlite3.connect(LEDGER_PATH, timeout=15)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS airings ("
+        " recording_id INTEGER PRIMARY KEY, channel_id INTEGER, title TEXT NOT NULL,"
+        " prog_start TEXT NOT NULL, rec_end TEXT NOT NULL, season INTEGER, episode INTEGER,"
+        " onscreen_episode TEXT, sub_title TEXT, status TEXT NOT NULL, bytes INTEGER,"
+        " updated TEXT NOT NULL)"
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS airings_rec_end ON airings(rec_end)")
+    return conn
+
+
+def _ledger_worthy(cp):
+    """Worth remembering: being recorded now, or finished with real content."""
+    status = cp.get("status")
+    return status == "recording" or (status in FINAL_STATUSES and (cp.get("bytes_written") or 0) > 0)
+
+
+def _ledger_forget(rid):
+    with closing(_ledger()) as conn, conn:
+        conn.execute("DELETE FROM airings WHERE recording_id = ?", (rid,))
+
+
+def _ledger_upsert(rec):
+    """Record (or refresh) this recording's airing; forget it if it has no content."""
+    cp, snap = _cp(rec), _snap(rec)
+    if not snap.get("title") or not _ledger_worthy(cp):
+        _ledger_forget(rec.pk)
+        return False
+    start = parse_datetime(snap.get("start_time") or "") or rec.start_time
+    row = (
+        rec.pk, rec.channel_id, snap["title"], _iso(start), _iso(rec.end_time),
+        snap.get("season"), snap.get("episode"), snap.get("onscreen_episode"), snap.get("sub_title"),
+        cp.get("status"), cp.get("bytes_written"), _iso(timezone.now()),
+    )
+    with closing(_ledger()) as conn, conn:
+        conn.execute("INSERT OR REPLACE INTO airings VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", row)
+    return True
+
+
+def _ledger_rows(lo, hi):
+    with closing(_ledger()) as conn:
+        return conn.execute(
+            "SELECT * FROM airings WHERE rec_end >= ? AND rec_end <= ?", (_iso(lo), _iso(hi))
+        ).fetchall()
+
+
+def _ledger_prune(cfg):
+    days = float(cfg["ledger_retention_days"] or 0)
+    if days <= 0:
+        return 0  # keep forever
+    cutoff = _iso(timezone.now() - timedelta(days=days))
+    with closing(_ledger()) as conn, conn:
+        return conn.execute("DELETE FROM airings WHERE rec_end < ?", (cutoff,)).rowcount
+
+
+def _ledger_backfill(cfg):
+    """Bring the ledger in line with the recordings Dispatcharr has right now."""
+    from apps.channels.models import Recording
+
+    kept = 0
+    for rec in Recording.objects.all():
+        if _ledger_upsert(rec):
+            kept += 1
+    return {"recordings_remembered": kept, "pruned": _ledger_prune(cfg)}
+
+
+class _Past:
+    """A recording only the ledger remembers (it has been deleted from Dispatcharr).
+
+    Quacks like a Recording for the rerun / already-handled checks."""
+
+    from_ledger = True
+
+    def __init__(self, row):
+        self.pk = row["recording_id"]
+        self.channel_id = row["channel_id"]
+        self.start_time = parse_datetime(row["prog_start"])
+        self.end_time = parse_datetime(row["rec_end"])
+        self.custom_properties = {
+            "status": row["status"],
+            "bytes_written": row["bytes"],
+            "program": {
+                "title": row["title"], "start_time": row["prog_start"], "season": row["season"],
+                "episode": row["episode"], "onscreen_episode": row["onscreen_episode"],
+                "sub_title": row["sub_title"],
+            },
+        }
+
+
+def _recent(rec, lo, hi):
+    """Other recordings ending between lo and hi: those in Dispatcharr, plus any
+    only the ledger remembers."""
+    from apps.channels.models import Recording
+
+    live = list(Recording.objects.exclude(pk=rec.pk).filter(end_time__gte=lo, end_time__lte=hi))
+    try:
+        rows = [r for r in _ledger_rows(lo, hi) if r["recording_id"] != rec.pk]
+    except Exception:
+        logger.exception("dvr_helper: could not read the ledger")
+        return live
+    ids = [r["recording_id"] for r in rows]
+    existing = set(Recording.objects.filter(pk__in=ids).values_list("pk", flat=True)) if ids else set()
+    return live + [_Past(r) for r in rows if r["recording_id"] not in existing]
+
+
+def _on_recording_deleting(sender, instance, **kwargs):
+    """Remember a recording that holds content just before it is deleted. One that
+    was still recording is a cancelled recording and is forgotten instead."""
+    try:
+        if not _settings():
+            return
+        if _cp(instance).get("status") == "recording":
+            _ledger_forget(instance.pk)
+        else:
+            _ledger_upsert(instance)
+    except Exception:
+        logger.exception("dvr_helper: could not update the ledger before delete")
+
+
+def _ledger_when_finished(rid):
+    """After recording_end: wait for the final status, then remember the airing."""
+    from apps.channels.models import Recording
+    from django.db import close_old_connections
+
+    for delay in (3, 12, 45, 120):
+        time.sleep(delay)
+        try:
+            rec = Recording.objects.filter(pk=rid).first()
+            if rec is None:
+                return
+            if _cp(rec).get("status") in FINAL_STATUSES:
+                _ledger_upsert(rec)
+                return
+        except Exception:
+            logger.exception("dvr_helper: ledger update failed for recording %s", rid)
+            return
+        finally:
+            close_old_connections()
+
+
+# --------------------------------------------------------------------------
 # Dedupe
 # --------------------------------------------------------------------------
 
@@ -379,32 +546,30 @@ def _drop_rerun(rec, cfg, rules, dry=False, trace=None):
     if not my_rules or not my_snap.get("title"):
         return False
     span = timedelta(hours=longest)
-    for other in Recording.objects.exclude(pk=rec.pk).filter(
-        end_time__gte=rec.end_time - span - timedelta(hours=6),
-        end_time__lte=rec.end_time + span,
-    ):
+    for other in _recent(rec, rec.end_time - span - timedelta(hours=6), rec.end_time + span):
+        tag = "%s%s" % (other.pk, " (ledger)" if getattr(other, "from_ledger", False) else "")
         if not _has_content(other):
-            note("%s: no content/dead" % other.pk)
+            note("%s: no content/dead" % tag)
             continue
         kind = _programme_match(my_snap, _snap(other))
         if kind is None:
-            note("%s: different programme (%r)" % (other.pk, _snap(other).get("title")))
+            note("%s: different programme (%r)" % (tag, _snap(other).get("title")))
             continue
         limit = timedelta(hours=game_hours if kind == "matchup" else title_hours)
         o_start = parse_datetime(_snap(other).get("start_time") or "") or other.start_time
         # Only the later airing is the rerun; keep the earlier one.
         if not (timedelta(0) < my_start - o_start <= limit):
             note("%s: %s match but %.1fh apart (limit %.0fh) or not earlier" % (
-                other.pk, kind, (my_start - o_start).total_seconds() / 3600, limit.total_seconds() / 3600))
+                tag, kind, (my_start - o_start).total_seconds() / 3600, limit.total_seconds() / 3600))
             continue
         ia, ib = _identity(my_snap), _identity(_snap(other))
         if ia is not None and ib is not None and ia != ib:
-            note("%s: different episode" % other.pk)
+            note("%s: different episode" % tag)
             continue  # different episode of the same series
         # The earlier airing's guide row is usually purged once it has aired, so its
         # rules can't always be looked up; only reject when they are known and differ.
         other_rules = _matched_rules(other, rules)
-        note("%s: %s match; its rules: %s" % (other.pk, kind, sorted(other_rules)))
+        note("%s: %s match; its rules: %s" % (tag, kind, sorted(other_rules)))
         if not other_rules or (other_rules & my_rules):
             if dry:
                 return other.pk
@@ -427,14 +592,7 @@ def _drop_handled_airing(rec, cfg, rules):
     if not my_rules:
         return False
     window = timedelta(minutes=float(cfg["window_minutes"]))
-    qs = (
-        Recording.objects.filter(
-            end_time__gte=rec.end_time - window,
-            end_time__lte=rec.end_time + window,
-        )
-        .exclude(pk=rec.pk)
-    )
-    for other in qs:
+    for other in _recent(rec, rec.end_time - window, rec.end_time + window):
         if _cp(other).get("status") not in HANDLED_STATUSES or not _same_airing(rec, other):
             continue
         # Must be the same programme: with the guide row purged we can't compare rules,
@@ -484,6 +642,8 @@ def _connect_signal():
     # Disconnect first so a plugin reload swaps in the new code.
     post_save.disconnect(sender=Recording, dispatch_uid=SIGNAL_UID)
     post_save.connect(_on_recording_saved, sender=Recording, dispatch_uid=SIGNAL_UID, weak=False)
+    pre_delete.disconnect(sender=Recording, dispatch_uid=DELETE_SIGNAL_UID)
+    pre_delete.connect(_on_recording_deleting, sender=Recording, dispatch_uid=DELETE_SIGNAL_UID, weak=False)
 
 
 def _sweep_reruns(cfg, rules):
@@ -506,6 +666,10 @@ def _sweep_reruns(cfg, rules):
 def _dedupe_all(cfg):
     from apps.channels.models import Recording
 
+    try:
+        _ledger_backfill(cfg)
+    except Exception:
+        logger.exception("dvr_helper: ledger backfill failed")
     rules = _rules()
     removed = []
     for rec in (
@@ -697,6 +861,10 @@ def _guard_started(rid, cfg, dry=False):
         return {"status": "ok", "removed": rid, "why": "rerun of an earlier recording"}
     if cfg["enable_dedupe"] and _drop_same_channel_duplicate(rec, cfg, rules):
         return {"status": "ok", "removed": rid, "why": "same-channel duplicate"}
+    try:
+        _ledger_upsert(rec)
+    except Exception:
+        logger.exception("dvr_helper: could not add recording %s to the ledger", rid)
     return {"status": "skipped", "reason": "nothing to cancel"}
 
 
@@ -1058,6 +1226,9 @@ class Plugin:
          "help_text": "TheSportsDB for sports games, TVMaze for TV shows, looked up by programme title only."},
         {"id": "sportsdb_api_key", "label": "TheSportsDB API key", "type": "string", "default": DEFAULTS["sportsdb_api_key"],
          "help_text": "Defaults to the public free test key."},
+        {"id": "ledger_retention_days", "label": "Remember recorded airings for N days", "type": "number",
+         "default": DEFAULTS["ledger_retention_days"],
+         "help_text": "Airings are remembered after the recording is deleted, so a replay is still skipped. Must be longer than the rerun windows. 0 keeps them forever."},
         {"id": "failover_pinned_rules", "label": "Also fail over for rules pinned to a channel", "type": "boolean",
          "default": DEFAULTS["failover_pinned_rules"],
          "help_text": "Rules with a channel/tvg_id set are normally left alone."},
@@ -1082,6 +1253,12 @@ class Plugin:
          "description": "Runs automatically after each EPG refresh: removes duplicate and rerun bookings.",
          "button_label": "Clean up now",
          "events": ["epg_refresh"]},
+        {"id": "ledger_backfill", "label": "Update the airing ledger",
+         "description": "Remember the recordings Dispatcharr has now and prune old entries. Runs automatically too.",
+         "button_label": "Update ledger"},
+        {"id": "ledger_forget", "label": "Forget a ledger entry",
+         "description": "Remove one airing from the ledger (pass recording_id) so a replay of it can be recorded again.",
+         "button_label": "Forget entry"},
         {"id": "push_metadata", "label": "Add metadata to finished recordings in Jellyfin",
          "description": "Writes the description and artwork for finished recordings that have not been done yet.",
          "button_label": "Push metadata"},
@@ -1145,6 +1322,18 @@ class Plugin:
                     except Exception as exc:
                         results[rec.pk] = {"status": "error", "message": str(exc)}
             return {"status": "ok", "results": results}
+        if action == "ledger_forget":
+            rid = (params or {}).get("recording_id")
+            if rid is None:
+                return {"status": "error", "message": "pass recording_id"}
+            _ledger_forget(int(rid))
+            return {"status": "ok", "forgot": int(rid)}
+        if action == "ledger_backfill":
+            result = _ledger_backfill(cfg)
+            with closing(_ledger()) as conn:
+                rows = [dict(r) for r in conn.execute(
+                    "SELECT recording_id, title, prog_start, status, bytes FROM airings ORDER BY prog_start DESC LIMIT 25")]
+            return {"status": "ok", **result, "ledger": rows}
         if action == "on_recording_start":
             payload = (params or {}).get("payload") or {}
             rid = payload.get("recording_id")
@@ -1158,10 +1347,12 @@ class Plugin:
             logger.info("dvr_helper: recording %s start guard: %s", rid, result)
             return result
         if action == "on_recording_end":
-            if not cfg["enable_failover"]:
-                return {"status": "skipped", "reason": "failover disabled"}
             payload = (params or {}).get("payload") or {}
             rid = payload.get("recording_id") or (payload.get("details") or {}).get("recording_id")
+            if rid is not None:
+                threading.Thread(target=_ledger_when_finished, args=(int(rid),), daemon=True).start()
+            if not cfg["enable_failover"]:
+                return {"status": "skipped", "reason": "failover disabled"}
             if rid is not None:
                 threading.Thread(
                     target=_failover_when_settled, args=(int(rid), cfg), daemon=True

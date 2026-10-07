@@ -14,6 +14,7 @@ It works from the DVR **series rules you already have** in Dispatcharr. There is
 |---|---|
 | **Dedupe** | Dispatcharr books a series-rule airing once per channel that carries it. DVR Helper keeps one and removes the others. |
 | **Reruns** | A later airing of something already recorded or booked is not recorded. For team-vs-team games (`Team A at Team B`), the same game within 24 hours is a rerun, however the title is worded (`Mammoth at Devils` and `NHL Hockey : Utah Mammoth at New Jersey Devils` are the same game) — teams don't play at the same venue back to back, and `A at B` is not `B at A`. Any other programme with an identical title within 12 hours is a rerun too. Different episodes of a series are kept. |
+| **Airing ledger** | The plugin remembers each recorded airing in a small SQLite file, so deleting a recording (or its file) in Dispatcharr or Jellyfin doesn't make a replay look new. See [Airing ledger](#airing-ledger). |
 | **Already handled** | If you stopped a recording, or it completed, the guide may keep listing the airing for hours and Dispatcharr re-books it. DVR Helper cancels the re-booking. |
 | **Failover** | If a recording dies because its stream died, a new recording starts on another channel airing the same programme, until the original end time. It is a separate file, not stitched into the first. |
 | **Start delay** | Series-rule recordings booked ahead of time start N minutes late (default 5). Dispatcharr's own offset only supports starting earlier. |
@@ -70,9 +71,20 @@ cd dvr-helper && zip -r dvr_helper.zip dvr_helper
 | Recordings folder as Jellyfin sees it | `/downloads/recordings` | The Jellyfin-side path of Dispatcharr's recordings folder. A Jellyfin library must include it. |
 | Fetch posters/artwork from public sources | on | |
 | TheSportsDB API key | `123` | The public free test key. |
+| Remember recorded airings for N days | 14 | How long the ledger keeps an airing. Keep it longer than the rerun windows. `0` keeps entries forever. |
 | Also fail over for rules pinned to a channel | off | |
 
-Actions (buttons): *Apply start delay*, *Run dedupe* (also sweeps upcoming reruns), *Retry failover*, *Clean up now*, *Push metadata*, *Run guard*. Most run automatically from Dispatcharr events (`recording_start`, `recording_end`, `epg_refresh`).
+Actions (buttons): *Apply start delay*, *Run dedupe* (also sweeps upcoming reruns), *Retry failover*, *Clean up now*, *Update ledger*, *Forget entry*, *Push metadata*, *Run guard*. Most run automatically from Dispatcharr events (`recording_start`, `recording_end`, `epg_refresh`).
+
+## Airing ledger
+
+Dispatcharr forgets a recording as soon as it is deleted, so without help a replay of a game you already watched (and deleted) would be recorded again. DVR Helper keeps its own small ledger instead: one row per recorded airing (title, programme time, status, size). The rerun and already-handled checks read it alongside Dispatcharr's recordings, so **deleting a recording, or only its file, from Dispatcharr or Jellyfin leaves the ledger entry in place**.
+
+* **Where:** `dvr_helper/ledger.db` in Dispatcharr's data folder (`/data/dvr_helper/ledger.db` inside the container). It's a plain SQLite file, deliberately outside the plugin folder so plugin updates don't touch it and outside Dispatcharr's own database so upgrades don't either. It isn't part of Dispatcharr's database backups.
+* **What goes in:** an airing is remembered when its recording starts, refreshed when it ends, and kept if the recording is deleted after it holds content. A recording cancelled while still recording, or one that captured nothing, is not remembered.
+* **Pruning:** entries older than the retention setting (14 days by default) are removed during the guide-refresh sweep.
+* **Forgetting one:** the *Forget entry* action (pass `recording_id`) removes an airing so a replay of it can be recorded again.
+* The plugin never touches Jellyfin for this; it only looks at its own ledger and Dispatcharr's recordings.
 
 ## Privacy
 
@@ -84,6 +96,7 @@ Actions (buttons): *Apply start delay*, *Run dedupe* (also sweeps upcoming rerun
 
 This is a beta. Things to know:
 
+* **The ledger only knows what the plugin has seen.** Recordings made before it was installed are added the first time it runs (on the next guide refresh or *Update ledger*). Anything deleted before that is not remembered.
 * **Booking-time hook is unreliable.** Dispatcharr books series-rule recordings in a Celery worker where the plugin's database hook doesn't reliably fire. The plugin therefore also runs its guards when a recording **starts** and after each **EPG refresh**. A duplicate or rerun can briefly appear as scheduled, or even start, before it is removed.
 * **Reruns are matched on title / team names only.** A rerun titled very differently won't match. Daily shows with no episode data that air within the rerun window of themselves are treated as reruns; lower the window if that bites.
 * **Sports artwork depends on TheSportsDB** having both teams. Otherwise you get text only. TVMaze matches by title alone, so two shows with the same name may get the wrong poster.
